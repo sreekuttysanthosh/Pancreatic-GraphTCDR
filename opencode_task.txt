@@ -1,0 +1,41 @@
+Inspect this project before making any changes.
+
+Project:
+D:\Pancreatic_GraphTCDR
+
+Inspect:
+- notebooks/
+- data/processed/
+- data/raw/
+- results/
+- src/
+
+Pay particular attention to:
+- Notebook 07
+- Notebook 08
+- Notebook 09, if it exists
+- integrated_modeling_table.csv
+- integrated_with_auc.csv
+- cold_drug_train.csv
+- cold_drug_test.csv
+- autoencoder_best.pt
+- existing graph files
+- targets_raw_v1.csv
+
+DO NOT modify, delete, overwrite, rename, or create anything.
+
+I only want an inspection report.
+
+Report:
+1. Important existing files
+2. What Notebook 07 currently does
+3. What Notebook 08 currently does
+4. What Notebook 09 currently does, if present
+5. Which preprocessing artifacts are already completed
+6. Any inconsistencies you find
+7. What you recommend as the next step
+
+Do NOT build GraphTCDR.
+Do NOT create a baseline notebook.
+Do NOT change the target.
+STOP after the inspection report.

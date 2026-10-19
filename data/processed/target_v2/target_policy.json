@@ -1,0 +1,15 @@
+{
+  "primary_target": "y_clip",
+  "secondary_target": "y_raw",
+  "LO": -3.2443480245857086,
+  "HI": 1.2945890283549102,
+  "bounds_computed_from": "training split only",
+  "validation_split": "GroupShuffleSplit by drug, test_size=0.10, random_state=42",
+  "quality_weight": "0.25 + 0.75*clip(r2,0,1); missing=0.625; normalized by training mean",
+  "subsets": {
+    "full": "all test observations",
+    "core": "abs(y_raw) <= 3",
+    "hq": "r2 >= 0.5",
+    "extreme": "abs(y_raw) > 3"
+  }
+}

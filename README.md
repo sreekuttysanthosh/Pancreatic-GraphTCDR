@@ -89,6 +89,17 @@ Scores are not comparable with the paper's. This is a GraphTCDR-inspired adaptat
 - Several paper baselines (DeepCDR, DeepTTA, GraphDRP, BANDRP, DRN-CDR) were not re-implemented.
 - No external validation; preclinical only.
 
+## Data Availability and Checkpoints
+
+Raw source datasets are not included in this repository. The project uses the PRISM Repurposing 19Q3 Primary Screen and GraphTCDR-related data.
+
+- **PRISM source:** [PRISM Repurposing 19Q3 Primary Screen](https://doi.org/10.6084/m9.figshare.9393293)
+- **Processed files:** The target-v2 splits and target policy are provided under `data/processed/target_v2/`.
+- **Model checkpoints:** Trained model checkpoints are not included in this repository.
+- **Reproducibility:** See `requirements.txt` and the notebooks for the processing, training, and evaluation workflow.
+
+Please consult the original data providers' terms and conditions for data access and redistribution requirements.
+
 ## Repository Structure
 
 - `notebooks/`: 01–04 data preparation; 05 baselines; 06 tail diagnosis; 07 target policy; 08 autoencoder and graph preparation; 09 old graph notebook (superseded); 10 GraphTCDR v2; 11 final evaluation.

@@ -67,10 +67,14 @@ was never used for training, weighting, early stopping or tuning.
 | Model | R² | MAE | Spearman |
 
 |---|---|---|---|
+| RF + AE (LDS + quality weighted) | 0.204 | 0.529 | 0.413 |
 
 | RF + AE (tail+quality weighted) | 0.197 | 0.525 | 0.418 |
 
+| RF + AE (LDS weighted) | 0.194 | 0.529 | 0.400 |
+
 | RF + AE (quality weighted) | 0.192 | 0.521 | 0.429 |
+
 
 | RF + AE | 0.182 | 0.521 | 0.420 |
 
@@ -108,7 +112,7 @@ Full tables: `results/v2/FINAL\_headline\_table\_yclip.csv`, `FINAL\_headline\_t
 
 1\. Every model beats the constant-prediction floor on unseen drugs. Random Forest is best and most stable.
 
-2\. Reweighting (quality, tail, or both) gives a small, consistent gain in RF (+0.01 to +0.015 R²) and in the CNN. Quality-only and tail-only effects cannot be separated.
+2\.Reweighting (quality, tail, LDS, or combinations) gives a small, consistent gain in RF (+0.01 to +0.02 R²) and in the CNN. The single-weight effects (quality-only, tail-only, LDS-only) cannot be separated from each other.
 
 3\. The GraphTCDR-inspired model did not beat simpler baselines here. Adding the paper's residual connection, 16 heads, and a Tanimoto kNN drug graph moved it only slightly. Response edges did not help on average.
 
@@ -116,6 +120,7 @@ Full tables: `results/v2/FINAL\_headline\_table\_yclip.csv`, `FINAL\_headline\_t
 
 5\. On `y\_raw`, all models score R² near 0 (best 0.026) because 59 extreme labels dominate the error.
 
+6\. LDS-style reweighting (Yang et al., ICML 2021; label-distribution smoothing only, not the full method) combined with curve-fit quality gave the highest RF R² (0.204 vs 0.182 unweighted) and the lowest error on sensitive responses. It also raised error in the dense 0-to-1 bin and left ranking (Spearman about 0.41) and sensitive-tail enrichment (about 3x chance) unchanged. It redistributes error rather than solving the long tail.
 
 
 !\[Bias by bin](results/v2/fig\_bias\_by\_bin.png)

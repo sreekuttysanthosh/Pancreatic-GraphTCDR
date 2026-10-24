@@ -104,7 +104,7 @@ Full tables:
 
 !\[Bias by bin](results/v2/fig\_bias\_by\_bin.png)
 
-
+7. Pan-cancer training (all 402 cell lines, 199,623 pairs, all validation and test drugs removed from every lineage) did not improve R² on pancreatic test pairs (0.167 vs 0.182) but slightly raised Spearman (0.442 vs 0.420). With the same 883 training drugs, this suggests drug-side information, not cell-line count, is the main limit. This is a hypothesis; more drugs were not tested.
 
 \## Differences from the GraphTCDR paper
 =======

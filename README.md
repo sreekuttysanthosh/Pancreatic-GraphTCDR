@@ -104,7 +104,9 @@ Full tables:
 
 !\[Bias by bin](results/v2/fig\_bias\_by\_bin.png)
 
-7. Pan-cancer training (all 402 cell lines, 199,623 pairs, all validation and test drugs removed from every lineage) did not improve R² on pancreatic test pairs (0.167 vs 0.182) but slightly raised Spearman (0.442 vs 0.420). With the same 883 training drugs, this suggests drug-side information, not cell-line count, is the main limit. This is a hypothesis; more drugs were not tested.
+7. Pan-cancer training (402 cell lines, 199,623 pairs, all validation and test drugs removed from every lineage) showed no detectable change in R² on pancreatic test pairs (0.167 vs 0.182; paired bootstrap difference -0.014, 95% CI [-0.034, +0.005]).
+8. Drug identity alone explains 76% of the variance in the clipped target. Random Forest ranks unseen drugs by average potency with Spearman 0.38 (cell-line mean baseline 0.13), but within-drug selectivity across pancreatic lines is only modestly above a cell-line-average baseline (median per-drug rho 0.33 vs 0.24).
+9. Uncertainty: intervals are bootstrap over the 246 test drugs (1,000 resamples). Seed SDs capture only model randomness and are about 15 to 20 times smaller. Random Forest R² is 0.18 (95% CI 0.09 to 0.28). RF beats the graph model, MLP and XGBoost on paired differences; RF vs CNN, and LDS+quality vs unweighted RF, are not distinguishable at 95%.
 
 \## Differences from the GraphTCDR paper
 =======

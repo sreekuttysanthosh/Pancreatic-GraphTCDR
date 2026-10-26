@@ -108,6 +108,7 @@ Full tables:
 8. Drug identity alone explains 76% of the variance in the clipped target. Random Forest ranks unseen drugs by average potency with Spearman 0.38 (cell-line mean baseline 0.13), but within-drug selectivity across pancreatic lines is only modestly above a cell-line-average baseline (median per-drug rho 0.33 vs 0.24).
 9. Uncertainty: intervals are bootstrap over the 246 test drugs (1,000 resamples). Seed SDs capture only model randomness and are about 15 to 20 times smaller. Random Forest R² is 0.18 (95% CI 0.09 to 0.28). RF beats the graph model, MLP and XGBoost on paired differences; RF vs CNN, and LDS+quality vs unweighted RF, are not distinguishable at 95%.
 10. Evaluation protocol alone changes apparent performance: for the same RF on the same data, a random pair split gives R² 0.584 ± 0.011, while a cold-drug split gives 0.153 ± 0.072 (3 split seeds each; `13_Split_Comparison.ipynb`). About 97-98% of test drugs appear in training under the random split.
+11.  Under a Bemis-Murcko scaffold split (analogues of test drugs removed from training), RF + AE R² falls to 0.066 ± 0.009 (vs 0.153 ± 0.072 for random drug-grouped splits, 3 seeds each; floor about 0.01), with Spearman 0.33 vs 0.38. Some signal remains, but the main cold-drug result is probably optimistic for novel chemistry. Only RF was tested (`14_Scaffold_Split.ipynb`).
 
 \## Differences from the GraphTCDR paper
 =======

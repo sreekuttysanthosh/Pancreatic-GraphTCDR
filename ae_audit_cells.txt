@@ -1,0 +1,209 @@
+
+===== CELL 5 =====
+
+
+import numpy as np
+import torch
+from sklearn.decomposition import PCA
+
+# Project paths
+ROOT = TARGET_DIR.parent.parent.parent
+PROCESSED = TARGET_DIR.parent
+
+# Load drug fingerprints
+fingerprints = np.load(
+    PROCESSED / "drug_morgan_fingerprints_1228x2048.npy"
+).astype(np.float32)
+
+assert fingerprints.shape == (1228, 2048)
+
+# Load cell-line mapping
+cell_mapping = pd.read_csv(
+    PROCESSED / "pancreatic28_cell_mapping.csv"
+)
+
+assert {"index", "cellLineName"}.issubset(cell_mapping.columns)
+
+index_to_name = dict(
+    zip(
+        cell_mapping["index"].astype(int),
+        cell_mapping["cellLineName"]
+    )
+)
+
+# ------------------------------------------------------------
+# A. Autoencoder features (512 dimensions)
+# ------------------------------------------------------------
+
+ae_df = pd.read_csv(
+    PROCESSED / "pancreatic28_ae_embeddings_512.csv"
+)
+
+assert ae_df.shape == (28, 513)
+assert ae_df["cellLineName"].is_unique
+
+ae_lookup = ae_df.set_index("cellLineName")
+
+cell_ae = {
+    int(row["index"]): ae_lookup.loc[
+        row["cellLineName"]
+    ].to_numpy(dtype=np.float32)
+    for _, row in cell_mapping.iterrows()
+}
+
+# ------------------------------------------------------------
+# B. PCA features (10 components per omics type)
+# ------------------------------------------------------------
+
+omics_names = [
+    "gene_expression",
+    "cnv",
+    "mirna",
+    "methylation"
+]
+
+pca_blocks = []
+
+for name in omics_names:
+    matrix = torch.load(
+        PROCESSED / f"pancreatic28_{name}.pt",
+        map_location="cpu",
+        weights_only=True
+    ).numpy().astype(np.float32)
+
+    assert matrix.shape[0] == len(cell_mapping), (
+        f"{name}: row count does not match cell mapping"
+    )
+
+    pca = PCA(n_components=10, random_state=42)
+    reduced = pca.fit_transform(matrix).astype(np.float32)
+    pca_blocks.append(reduced)
+
+    print(
+        f"{name}: {reduced.shape}, "
+        f"variance retained = "
+        f"{pca.explained_variance_ratio_.sum():.4f}"
+    )
+
+pca40 = np.concatenate(pca_blocks, axis=1)
+
+assert pca40.shape == (28, 40)
+
+cell_pca = {
+    int(original_index): pca40[position]
+    for position, original_index
+    in enumerate(cell_mapping["index"])
+}
+
+# ------------------------------------------------------------
+# C. Construct model input matrices
+# ------------------------------------------------------------
+
+def make_features(df, cell_features):
+    cell_indices = df["omics_index"].astype(int).to_numpy()
+    drug_indices = df["drug_index"].astype(int).to_numpy()
+
+    cell_matrix = np.stack([
+        cell_features[index]
+        for index in cell_indices
+    ]).astype(np.float32)
+
+    drug_matrix = fingerprints[drug_indices]
+
+    X = np.concatenate(
+        [cell_matrix, drug_matrix],
+        axis=1
+    ).astype(np.float32)
+
+    assert np.isfinite(X).all()
+    return X
+
+FEATS = {}
+
+for feature_name, cell_features in [
+    ("pca", cell_pca),
+    ("ae", cell_ae)
+]:
+    X_train = make_features(train, cell_features)
+    X_val = make_features(val, cell_features)
+    X_test = make_features(test, cell_features)
+
+    FEATS[feature_name] = (X_train, X_val, X_test)
+
+    print(f"\n{feature_name.upper()} features")
+    print("Train:", X_train.shape)
+    print("Validation:", X_val.shape)
+    print("Test:", X_test.shape)
+
+# Targets: clipped target for training; raw target for secondary evaluation
+y_train = train["y_clip"].to_numpy(dtype=np.float32)
+y_val = val["y_clip"].to_numpy(dtype=np.float32)
+y_test_clip = test["y_clip"].to_numpy(dtype=np.float32)
+y_test_raw = test["y_raw"].to_numpy(dtype=np.float32)
+
+print("\nTarget shapes:", y_train.shape, y_val.shape)
+print("Cell and drug feature preparation completed.")
+
+===== CELL 56 =====
+import pandas as pd, torch
+from pathlib import Path
+D = Path(r"D:\Pancreatic_GraphTCDR\data"); RAW = D/"raw"; P = D/"processed"
+
+names = pd.read_csv(RAW/"cellLineName402.csv")
+print("cellLineName402:", names.shape, names.columns.tolist()); print(names.head(3))
+
+ck = torch.load(P/"autoencoder_best.pt", map_location="cpu", weights_only=True)
+print({k: ck[k] for k in ck if k != "model_state_dict"})
+sd = ck.get("model_state_dict", ck)
+print([ (k, tuple(v.shape)) for k, v in sd.items() if not k.startswith("encoder.0") and "running" not in k and "num_batches" not in k])
+
+print(pd.read_csv(P/"pancreatic28_cell_mapping.csv").head(3))
+print(pd.read_csv(P/"pancreatic28_ae_embeddings_512.csv").iloc[:2, :4])
+print(torch.load(RAW/"miRNAFeature402.pt", map_location="cpu", weights_only=True).shape)
+
+===== CELL 57 =====
+import numpy as np, pandas as pd, torch, torch.nn as nn
+from pathlib import Path
+
+D = Path(r"D:\Pancreatic_GraphTCDR\data"); RAW = D/"raw"; P = D/"processed"
+dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class AE(nn.Module):
+    def __init__(s, sigmoid_latent):
+        super().__init__()
+        s.encoder = nn.Sequential(
+            nn.Linear(43720, 4096), nn.BatchNorm1d(4096), nn.ReLU(),
+            nn.Linear(4096, 1024), nn.BatchNorm1d(1024), nn.ReLU(),
+            nn.Linear(1024, 512), nn.BatchNorm1d(512),
+            *( [nn.Sigmoid()] if sigmoid_latent else [] ))
+        s.decoder = nn.Sequential(
+            nn.Linear(512, 1024), nn.BatchNorm1d(1024), nn.ReLU(),
+            nn.Linear(1024, 4096), nn.BatchNorm1d(4096), nn.ReLU(),
+            nn.Linear(4096, 43720), nn.Sigmoid())
+
+ck = torch.load(P/"autoencoder_best.pt", map_location="cpu", weights_only=True)
+sd = ck["model_state_dict"]
+
+# inputs: same order as training (expression, CNV, miRNA), same scaling as Notebook 08
+ge = torch.load(RAW/"GeneExpressionFeature402.pt", map_location="cpu", weights_only=True).float()
+cn = torch.load(RAW/"CNVFeature402.pt", map_location="cpu", weights_only=True).float()
+mi = torch.load(RAW/"miRNAFeature402.pt", map_location="cpu", weights_only=True).float()
+X = torch.cat([ge, cn, mi], 1)
+print("input", tuple(X.shape), "min/max", float(X.min()), float(X.max()))
+
+saved = pd.read_csv(P/"pancreatic28_ae_embeddings_512.csv").set_index("cellLineName")
+names = pd.read_csv(RAW/"cellLineName402.csv")
+panc = [n for n in saved.index]
+rows = [int(names.index[names.cellLineName == n][0]) for n in panc]
+
+best = None
+for sig in (False, True):
+    m = AE(sig); m.load_state_dict(sd); m.eval().to(dev)
+    with torch.no_grad(): Z = m.encoder(X.to(dev)).cpu().numpy()
+    diff = np.abs(Z[rows] - saved.loc[panc].to_numpy()).max()
+    print(f"sigmoid_latent={sig}: max abs diff vs saved 28 rows = {diff:.6f}")
+    if best is None or diff < best[0]: best = (diff, sig, Z)
+
+diff, sig, Z402 = best
+np.save(P/"ae_embeddings_402x512.npy", Z402)
+print("chosen sigmoid_latent:", sig, "| diff:", diff)

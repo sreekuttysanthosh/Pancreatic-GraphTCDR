@@ -1,0 +1,1748 @@
+
+===== CELL 2 =====
+import os
+import torch
+
+PROJECT = r"D:\Pancreatic_GraphTCDR"
+RAW = os.path.join(PROJECT, "data", "raw")
+
+files = {
+    "Gene Expression": "GeneExpressionFeature402.pt",
+    "CNV": "CNVFeature402.pt",
+    "miRNA": "miRNAFeature402.pt"
+}
+
+features = {}
+
+for feature_name, filename in files.items():
+
+    path = os.path.join(RAW, filename)
+
+    print(f"\nChecking {feature_name}")
+    print(f"Path: {path}")
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"{feature_name} file was not found:\n{path}"
+        )
+
+    tensor = torch.load(path, map_location="cpu")
+    tensor = torch.as_tensor(tensor).float()
+
+    features[feature_name] = tensor
+
+    print(f"Shape: {tuple(tensor.shape)}")
+    print(f"Minimum: {tensor.min().item():.6f}")
+    print(f"Maximum: {tensor.max().item():.6f}")
+    print(f"NaN values: {torch.isnan(tensor).sum().item():,}")
+    print(f"Inf values: {torch.isinf(tensor).sum().item():,}")
+
+
+print("\n" + "=" * 70)
+print("EXPECTED SHAPES")
+print("=" * 70)
+
+expected_shapes = {
+    "Gene Expression": (402, 20404),
+    "CNV": (402, 22582),
+    "miRNA": (402, 734)
+}
+
+for name, expected_shape in expected_shapes.items():
+
+    actual_shape = tuple(features[name].shape)
+
+    print(
+        f"{name}: "
+        f"expected={expected_shape}, "
+        f"actual={actual_shape}"
+    )
+
+    if actual_shape != expected_shape:
+        raise ValueError(
+            f"{name} shape mismatch: "
+            f"expected {expected_shape}, "
+            f"found {actual_shape}"
+        )
+
+print("\nInput-file verification completed.")
+
+===== CELL 4 =====
+X = torch.cat(
+    [
+        features["Gene Expression"],
+        features["CNV"],
+        features["miRNA"]
+    ],
+    dim=1
+)
+
+print("=" * 70)
+print("CONCATENATED MULTI-OMICS MATRIX")
+print("=" * 70)
+
+print(f"Shape: {tuple(X.shape)}")
+
+print(f"\nExpected shape: (402, 43720)")
+print(f"Actual shape:   {tuple(X.shape)}")
+
+print(f"\nMinimum value: {X.min().item():.6f}")
+print(f"Maximum value: {X.max().item():.6f}")
+
+print(f"\nNaN values: {torch.isnan(X).sum().item():,}")
+print(f"Inf values: {torch.isinf(X).sum().item():,}")
+
+expected_features = 20404 + 22582 + 734
+
+if X.shape != (402, expected_features):
+    raise ValueError(
+        f"Unexpected concatenated shape: {tuple(X.shape)}"
+    )
+
+if torch.isnan(X).any():
+    raise ValueError("Concatenated matrix contains NaN values.")
+
+if torch.isinf(X).any():
+    raise ValueError("Concatenated matrix contains infinite values.")
+
+print("\n" + "=" * 70)
+print("VERIFICATION PASSED")
+print("=" * 70)
+
+print(
+    f"Each of the 402 cell lines is now represented by "
+    f"{X.shape[1]:,} multi-omics features."
+)
+
+===== CELL 9 =====
+# Create a small batch from the actual multi-omics data
+x_test = X[:4]
+
+# Put the model in evaluation mode
+model = AutoEncoder()
+model.eval()
+
+# Forward pass
+with torch.no_grad():
+
+    latent = model.encoder(x_test)
+    reconstructed = model(x_test)
+
+
+print("=" * 70)
+print("AUTOENCODER SMOKE TEST")
+print("=" * 70)
+
+print(f"Input shape:          {tuple(x_test.shape)}")
+print(f"Latent shape:         {tuple(latent.shape)}")
+print(f"Reconstructed shape:  {tuple(reconstructed.shape)}")
+
+print(f"\nInput range:")
+print(f"  Minimum: {x_test.min().item():.6f}")
+print(f"  Maximum: {x_test.max().item():.6f}")
+
+print(f"\nReconstructed range:")
+print(f"  Minimum: {reconstructed.min().item():.6f}")
+print(f"  Maximum: {reconstructed.max().item():.6f}")
+
+
+# ------------------------------------------------------------
+# Shape checks
+# ------------------------------------------------------------
+
+if x_test.shape != (4, 43720):
+    raise ValueError(
+        f"Unexpected input shape: {tuple(x_test.shape)}"
+    )
+
+if latent.shape != (4, 512):
+    raise ValueError(
+        f"Unexpected latent shape: {tuple(latent.shape)}"
+    )
+
+if reconstructed.shape != (4, 43720):
+    raise ValueError(
+        f"Unexpected reconstructed shape: {tuple(reconstructed.shape)}"
+    )
+
+
+# ------------------------------------------------------------
+# Output-range check
+# ------------------------------------------------------------
+
+if reconstructed.min().item() < 0 or reconstructed.max().item() > 1:
+    raise ValueError(
+        "Reconstructed values are outside the expected [0, 1] range."
+    )
+
+
+print("\n" + "=" * 70)
+print("SMOKE TEST PASSED")
+print("=" * 70)
+
+print(
+    "The Autoencoder successfully maps "
+    "43,720-dimensional inputs to 512-dimensional "
+    "latent representations and reconstructs them."
+)
+
+===== CELL 17 =====
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, TensorDataset
+
+===== CELL 18 =====
+#convert cell-line indices into train/holdout sets
+cell_indices = np.arange(X.shape[0])
+
+train_indices, holdout_indices = train_test_split(
+    cell_indices,
+    test_size=40,
+    random_state=SEED,
+    shuffle=True
+)
+
+===== CELL 22 =====
+# Display split information
+print("=" * 70)
+print("AUTOENCODER TRAIN / HOLDOUT SPLIT")
+print("=" * 70)
+
+print(f"Total cell lines:       {len(cell_indices)}")
+print(f"Training cell lines:    {len(train_indices)}")
+print(f"Holdout cell lines:     {len(holdout_indices)}")
+
+print("\nTraining matrix shape:")
+print(tuple(X_train_ae.shape))
+
+print("\nHoldout matrix shape:")
+print(tuple(X_holdout_ae.shape))
+
+print("\nDataLoader batches:")
+print(f"Training batches:       {len(train_loader)}")
+print(f"Holdout batches:        {len(holdout_loader)}")
+
+===== CELL 23 =====
+# Verify no overlap
+overlap = set(train_indices).intersection(set(holdout_indices))
+
+if len(overlap) != 0:
+    raise ValueError(
+        f"Train/holdout overlap detected: {overlap}"
+    )
+
+print("\nNo cell-line overlap detected.")
+print("Train/holdout split verified successfully.")
+
+===== CELL 25 =====
+#########
+import torch.optim as optim
+
+
+# ------------------------------------------------------------
+# Create a fresh model
+# ------------------------------------------------------------
+
+model = AutoEncoder(
+    input_dim=INPUT_DIM,
+    hidden_dim_1=HIDDEN_DIM_1,
+    hidden_dim_2=HIDDEN_DIM_2,
+    latent_dim=LATENT_DIM
+).to(DEVICE)
+
+
+# ------------------------------------------------------------
+# Loss function and optimizer
+# ------------------------------------------------------------
+
+criterion = nn.MSELoss()
+
+optimizer = optim.Adam(
+    model.parameters(),
+    lr=LEARNING_RATE
+)
+
+
+# ------------------------------------------------------------
+# Run a very short training test
+# ------------------------------------------------------------
+
+SMOKE_TEST_EPOCHS = 3
+
+print("=" * 70)
+print("AUTOENCODER TRAINING SMOKE TEST")
+print("=" * 70)
+
+print(f"Device: {DEVICE}")
+print(f"Smoke-test epochs: {SMOKE_TEST_EPOCHS}")
+
+for epoch in range(SMOKE_TEST_EPOCHS):
+
+    model.train()
+
+    running_loss = 0.0
+    total_samples = 0
+
+    for (batch,) in train_loader:
+
+        batch = batch.to(DEVICE)
+
+        optimizer.zero_grad()
+
+        reconstructed = model(batch)
+
+        loss = criterion(reconstructed, batch)
+
+        loss.backward()
+
+        optimizer.step()
+
+        batch_size = batch.size(0)
+
+        running_loss += loss.item() * batch_size
+        total_samples += batch_size
+
+    train_loss = running_loss / total_samples
+
+    # --------------------------------------------------------
+    # Holdout evaluation
+    # --------------------------------------------------------
+
+    model.eval()
+
+    holdout_loss = 0.0
+    holdout_samples = 0
+
+    with torch.no_grad():
+
+        for (batch,) in holdout_loader:
+
+            batch = batch.to(DEVICE)
+
+            reconstructed = model(batch)
+
+            loss = criterion(reconstructed, batch)
+
+            batch_size = batch.size(0)
+
+            holdout_loss += loss.item() * batch_size
+            holdout_samples += batch_size
+
+    holdout_loss = holdout_loss / holdout_samples
+
+    print(
+        f"Epoch {epoch + 1}/{SMOKE_TEST_EPOCHS} | "
+        f"Train MSE: {train_loss:.6f} | "
+        f"Holdout MSE: {holdout_loss:.6f}"
+    )
+
+
+print("\n" + "=" * 70)
+print("TRAINING SMOKE TEST COMPLETED")
+print("=" * 70)
+
+===== CELL 32 =====
+
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+
+# ------------------------------------------------------------
+# Confirm GPU
+
+
+if not torch.cuda.is_available():
+    raise RuntimeError(
+        "CUDA is not available. Stop here and check the GPU setup."
+    )
+
+DEVICE = torch.device("cuda")
+
+print("=" * 70)
+print("AUTOENCODER GPU TRAINING SMOKE TEST")
+print("=" * 70)
+
+print(f"Device: {DEVICE}")
+print(f"GPU: {torch.cuda.get_device_name(0)}")
+
+
+# ------------------------------------------------------------
+# Create a fresh Autoencoder
+
+
+model = AutoEncoder(
+    input_dim=INPUT_DIM,
+    hidden_dim_1=HIDDEN_DIM_1,
+    hidden_dim_2=HIDDEN_DIM_2,
+    latent_dim=LATENT_DIM
+).to(DEVICE)
+
+
+# ------------------------------------------------------------
+# Loss and optimizer
+
+
+criterion = nn.MSELoss()
+
+optimizer = optim.Adam(
+    model.parameters(),
+    lr=LEARNING_RATE
+)
+
+
+# ------------------------------------------------------------
+# GPU training smoke test
+
+
+SMOKE_TEST_EPOCHS = 3
+
+for epoch in range(SMOKE_TEST_EPOCHS):
+
+    model.train()
+
+    running_loss = 0.0
+    total_samples = 0
+
+    for (batch,) in train_loader:
+
+        batch = batch.to(DEVICE)
+
+        optimizer.zero_grad()
+
+        reconstructed = model(batch)
+
+        loss = criterion(reconstructed, batch)
+
+        loss.backward()
+
+        optimizer.step()
+
+        batch_size = batch.size(0)
+
+        running_loss += loss.item() * batch_size
+        total_samples += batch_size
+
+    train_loss = running_loss / total_samples
+
+
+    # --------------------------------------------------------
+    # Holdout evaluation
+   
+
+    model.eval()
+
+    holdout_loss = 0.0
+    holdout_samples = 0
+
+    with torch.no_grad():
+
+        for (batch,) in holdout_loader:
+
+            batch = batch.to(DEVICE)
+
+            reconstructed = model(batch)
+
+            loss = criterion(reconstructed, batch)
+
+            batch_size = batch.size(0)
+
+            holdout_loss += loss.item() * batch_size
+            holdout_samples += batch_size
+
+    holdout_loss = holdout_loss / holdout_samples
+
+
+    # --------------------------------------------------------
+    # GPU memory information
+
+    gpu_memory = torch.cuda.memory_allocated() / (1024 ** 3)
+    gpu_reserved = torch.cuda.memory_reserved() / (1024 ** 3)
+
+    print(
+        f"Epoch {epoch + 1}/{SMOKE_TEST_EPOCHS} | "
+        f"Train MSE: {train_loss:.6f} | "
+        f"Holdout MSE: {holdout_loss:.6f} | "
+        f"GPU allocated: {gpu_memory:.2f} GB | "
+        f"GPU reserved: {gpu_reserved:.2f} GB"
+    )
+
+
+print("\n" + "=" * 70)
+print("GPU TRAINING SMOKE TEST COMPLETED")
+print("=" * 70)
+
+===== CELL 33 =====
+import copy
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+print("=" * 70)
+print("FULL AUTOENCODER TRAINING")
+print("=" * 70)
+
+model = AutoEncoder(
+    input_dim=INPUT_DIM,
+    hidden_dim_1=HIDDEN_DIM_1,
+    hidden_dim_2=HIDDEN_DIM_2,
+    latent_dim=LATENT_DIM
+).to(DEVICE)
+
+criterion = nn.MSELoss()
+optimizer = optim.Adam(
+    model.parameters(),
+    lr=LEARNING_RATE
+)
+
+train_losses = []
+holdout_losses = []
+
+best_holdout_loss = float("inf")
+best_state_dict = None
+best_epoch = None
+
+for epoch in range(1, EPOCHS + 1):
+
+    # -------------------------
+    # Training
+    # -------------------------
+    model.train()
+    train_loss = 0.0
+
+    for (batch_x,) in train_loader:
+        batch_x = batch_x.to(DEVICE)
+
+        optimizer.zero_grad()
+
+        reconstructed = model(batch_x)
+        loss = criterion(reconstructed, batch_x)
+
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item() * batch_x.size(0)
+
+    train_loss /= len(train_loader.dataset)
+
+    # -------------------------
+    # Holdout evaluation
+    # -------------------------
+    model.eval()
+    holdout_loss = 0.0
+
+    with torch.no_grad():
+        for (batch_x,) in holdout_loader:
+            batch_x = batch_x.to(DEVICE)
+
+            reconstructed = model(batch_x)
+            loss = criterion(reconstructed, batch_x)
+
+            holdout_loss += loss.item() * batch_x.size(0)
+
+    holdout_loss /= len(holdout_loader.dataset)
+
+    train_losses.append(train_loss)
+    holdout_losses.append(holdout_loss)
+
+    # -------------------------
+    # Save best model
+    # -------------------------
+    if holdout_loss < best_holdout_loss:
+        best_holdout_loss = holdout_loss
+        best_epoch = epoch
+        best_state_dict = copy.deepcopy(model.state_dict())
+
+    # -------------------------
+    # Progress
+    # -------------------------
+    if epoch == 1 or epoch % 10 == 0:
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+
+        print(
+            f"Epoch {epoch:3d}/{EPOCHS} | "
+            f"Train MSE: {train_loss:.6f} | "
+            f"Holdout MSE: {holdout_loss:.6f} | "
+            f"Best: {best_holdout_loss:.6f} "
+            f"(epoch {best_epoch}) | "
+            f"GPU: {allocated:.2f} GB"
+        )
+
+# Restore best model
+model.load_state_dict(best_state_dict)
+model.eval()
+
+print("\n" + "=" * 70)
+print("FULL TRAINING COMPLETED")
+print("=" * 70)
+print(f"Best epoch: {best_epoch}")
+print(f"Best holdout MSE: {best_holdout_loss:.6f}")
+
+===== CELL 34 =====
+# Save the newly trained best Autoencoder checkpoint
+
+import os
+import torch
+
+MODEL_DIR = os.path.join(
+    PROJECT,
+    "data",
+    "processed"
+)
+
+MODEL_PATH = os.path.join(
+    MODEL_DIR,
+    "autoencoder_best.pt"
+)
+
+torch.save(
+    {
+        "model_state_dict": best_state_dict,
+        "input_dim": INPUT_DIM,
+        "hidden_dim_1": HIDDEN_DIM_1,
+        "hidden_dim_2": HIDDEN_DIM_2,
+        "latent_dim": LATENT_DIM,
+        "learning_rate": LEARNING_RATE,
+        "epochs": EPOCHS,
+        "batch_size": BATCH_SIZE,
+        "best_epoch": best_epoch,
+        "best_holdout_mse": best_holdout_loss,
+        "seed": SEED,
+    },
+    MODEL_PATH
+)
+
+print("=" * 70)
+print("UPDATED AUTOENCODER CHECKPOINT")
+print("=" * 70)
+
+print("Best epoch:", best_epoch)
+print("Best holdout MSE:", best_holdout_loss)
+print("Saved to:", MODEL_PATH)
+print("File exists:", os.path.exists(MODEL_PATH))
+
+print("\n✓ NEW BEST AUTOENCODER SAVED")
+
+===== CELL 39 =====
+# Generate final 512-dimensional embeddings for the 28 pancreatic cell lines
+
+import os
+import numpy as np
+import pandas as pd
+import torch
+
+# ------------------------------------------------------------
+# 1. Load the pancreatic cell-line mapping
+# ------------------------------------------------------------
+mapping_path = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "pancreatic28_cell_mapping.csv"
+)
+
+mapping = pd.read_csv(mapping_path)
+
+print("=" * 70)
+print("PANCREATIC CELL-LINE MAPPING")
+print("=" * 70)
+print("Number of pancreatic cell lines:", len(mapping))
+print("Columns:", mapping.columns.tolist())
+
+
+# ------------------------------------------------------------
+# 2. Obtain the original 402-cell indices
+# ------------------------------------------------------------
+pancreatic_indices = mapping["index"].astype(int).to_numpy()
+
+print("\nOriginal 402-cell indices:")
+print(pancreatic_indices)
+
+
+# ------------------------------------------------------------
+# 3. Move the corresponding multi-omics rows to the GPU
+# ------------------------------------------------------------
+X_pancreatic = X[pancreatic_indices].to(DEVICE)
+
+print("\nPancreatic input shape:", tuple(X_pancreatic.shape))
+
+
+# ------------------------------------------------------------
+# 4. Extract the 512-dimensional encoder representation
+# ------------------------------------------------------------
+with torch.no_grad():
+    pancreatic_embeddings = MODEL.encoder(X_pancreatic)
+
+pancreatic_embeddings = pancreatic_embeddings.cpu().numpy()
+
+
+# ------------------------------------------------------------
+# 5. Verify the generated embeddings
+# ------------------------------------------------------------
+print("\nGenerated embedding shape:",
+      pancreatic_embeddings.shape)
+
+print("Minimum value:", pancreatic_embeddings.min())
+print("Maximum value:", pancreatic_embeddings.max())
+
+print("NaN values:",
+      np.isnan(pancreatic_embeddings).sum())
+
+print("Inf values:",
+      np.isinf(pancreatic_embeddings).sum())
+
+
+# ------------------------------------------------------------
+# 6. Save the embeddings
+# ------------------------------------------------------------
+embedding_columns = [
+    f"AE_{i}"
+    for i in range(1, pancreatic_embeddings.shape[1] + 1)
+]
+
+embedding_df = pd.DataFrame(
+    pancreatic_embeddings,
+    columns=embedding_columns
+)
+
+embedding_df.insert(
+    0,
+    "cellLineName",
+    mapping["cellLineName"].values
+)
+
+embedding_path = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "pancreatic28_ae_embeddings_512.csv"
+)
+
+embedding_df.to_csv(
+    embedding_path,
+    index=False
+)
+
+print("\nSaved to:")
+print(embedding_path)
+
+print("\n✓ FINAL PANCREATIC EMBEDDINGS GENERATED")
+print("✓ 28 cell lines × 512 latent features")
+print("✓ Generated from best epoch-388 checkpoint")
+
+===== CELL 43 =====
+# Verify the frozen cold-drug split
+
+import os
+import pandas as pd
+
+TRAIN_SPLIT_PATH = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "splits",
+    "cold_drug_train.csv"
+)
+
+TEST_SPLIT_PATH = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "splits",
+    "cold_drug_test.csv"
+)
+
+train_df = pd.read_csv(TRAIN_SPLIT_PATH)
+test_df = pd.read_csv(TEST_SPLIT_PATH)
+
+train_drugs = set(train_df["drug_index"].unique())
+test_drugs = set(test_df["drug_index"].unique())
+
+train_cells = set(train_df["omics_index"].unique())
+test_cells = set(test_df["omics_index"].unique())
+
+drug_overlap = train_drugs.intersection(test_drugs)
+
+print("=" * 70)
+print("FROZEN COLD-DRUG SPLIT VERIFICATION")
+print("=" * 70)
+
+print("\nTraining pairs:", len(train_df))
+print("Testing pairs:", len(test_df))
+
+print("\nTraining drugs:", len(train_drugs))
+print("Testing drugs:", len(test_drugs))
+print("Total unique drugs:", len(train_drugs | test_drugs))
+
+print("\nTraining cells:", len(train_cells))
+print("Testing cells:", len(test_cells))
+
+print("\nDrug overlap:", len(drug_overlap))
+
+print("\nExpected:")
+print("Train drugs = 982")
+print("Test drugs  = 246")
+print("Train pairs = 14,235")
+print("Test pairs  = 3,802")
+print("Drug overlap = 0")
+print("Cells in train/test = 28")
+
+# Explicit assertions
+assert len(train_df) == 14235
+assert len(test_df) == 3802
+assert len(train_drugs) == 982
+assert len(test_drugs) == 246
+assert len(train_drugs | test_drugs) == 1228
+assert len(drug_overlap) == 0
+assert len(train_cells) == 28
+assert len(test_cells) == 28
+
+print("\n" + "=" * 70)
+print("✓ ALL COLD-DRUG SPLIT CHECKS PASSED")
+print("=" * 70)
+
+===== CELL 45 =====
+# Verify and construct the 402-cell -> 28-cell graph-node mapping
+
+import os
+import pandas as pd
+import numpy as np
+
+MAPPING_PATH = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "pancreatic28_cell_mapping.csv"
+)
+
+mapping_check = pd.read_csv(MAPPING_PATH)
+
+print("=" * 70)
+print("402-CELL → 28-CELL NODE MAPPING")
+print("=" * 70)
+
+print("Mapping shape:", mapping_check.shape)
+print("\nMapping columns:", mapping_check.columns.tolist())
+
+# ------------------------------------------------------------
+# Construct explicit mapping
+# ------------------------------------------------------------
+
+original_to_local = {
+    int(row["index"]): local_idx
+    for local_idx, (_, row) in enumerate(mapping_check.iterrows())
+}
+
+local_to_original = {
+    local_idx: int(row["index"])
+    for local_idx, (_, row) in enumerate(mapping_check.iterrows())
+}
+
+# ------------------------------------------------------------
+# Verify the mapping
+# ------------------------------------------------------------
+
+print("\nNumber of original indices:", len(original_to_local))
+print("Number of local nodes:", len(local_to_original))
+
+print("\nFirst 10 mappings:")
+for original_idx, local_idx in list(original_to_local.items())[:10]:
+    cell_name = mapping_check.iloc[local_idx]["cellLineName"]
+    print(
+        f"Original index {original_idx:>3} "
+        f"→ Local node {local_idx:>2} "
+        f"→ {cell_name}"
+    )
+
+# ------------------------------------------------------------
+# Consistency checks
+# ------------------------------------------------------------
+
+assert len(mapping_check) == 28
+assert len(original_to_local) == 28
+assert len(local_to_original) == 28
+
+assert len(set(original_to_local.values())) == 28
+assert len(set(local_to_original.values())) == 28
+
+# Every local node must have a corresponding cell name
+assert mapping_check["cellLineName"].notna().all()
+
+print("\n" + "=" * 70)
+print("✓ 402 → 28 INDEX MAPPING VERIFIED")
+print("=" * 70)
+
+print("\nOriginal index range:")
+print(
+    min(original_to_local.keys()),
+    "to",
+    max(original_to_local.keys())
+)
+
+print("Local graph-node range:")
+print(
+    min(original_to_local.values()),
+    "to",
+    max(original_to_local.values())
+)
+
+===== CELL 47 =====
+# Verify the training-only response graph after 402 -> 28 index conversion
+
+import os
+import numpy as np
+import pandas as pd
+
+RESPONSE_EDGE_PATH = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "train_response_cell_drug_edges_lower50.csv"
+)
+
+response_edges_raw = pd.read_csv(RESPONSE_EDGE_PATH)
+
+print("=" * 70)
+print("TRAINING-ONLY RESPONSE GRAPH VERIFICATION")
+print("=" * 70)
+
+print("Saved edge table shape:", response_edges_raw.shape)
+print("Columns:", response_edges_raw.columns.tolist())
+
+# ------------------------------------------------------------
+# Convert original 402-cell indices to local 0–27 indices
+# ------------------------------------------------------------
+
+response_edges_local = response_edges_raw.copy()
+
+response_edges_local["cell_local"] = (
+    response_edges_local["omics_index"]
+    .map(original_to_local)
+)
+
+# ------------------------------------------------------------
+# Check that every original cell index was mapped
+# ------------------------------------------------------------
+
+missing_mappings = response_edges_local[
+    response_edges_local["cell_local"].isna()
+]
+
+print("\nEdges with missing cell mapping:",
+      len(missing_mappings))
+
+assert len(missing_mappings) == 0
+
+# ------------------------------------------------------------
+# Convert to integer local indices
+# ------------------------------------------------------------
+
+response_edges_local["cell_local"] = (
+    response_edges_local["cell_local"]
+    .astype(int)
+)
+
+# ------------------------------------------------------------
+# Basic graph statistics
+# ------------------------------------------------------------
+
+unique_cells = set(
+    response_edges_local["cell_local"].unique()
+)
+
+unique_drugs = set(
+    response_edges_local["drug_index"].unique()
+)
+
+print("\nNumber of response edges:",
+      len(response_edges_local))
+
+print("Unique local cell nodes:",
+      len(unique_cells))
+
+print("Local cell-node range:",
+      min(unique_cells),
+      "to",
+      max(unique_cells))
+
+print("Unique drugs in response graph:",
+      len(unique_drugs))
+
+print("Drug-index range:",
+      min(unique_drugs),
+      "to",
+      max(unique_drugs))
+
+# ------------------------------------------------------------
+# Check local cell-node validity
+# ------------------------------------------------------------
+
+assert min(unique_cells) >= 0
+assert max(unique_cells) < 28
+assert len(unique_cells) == 28
+
+# ------------------------------------------------------------
+# Check that every response-graph drug is a training drug
+# ------------------------------------------------------------
+
+response_drug_overlap_with_test = (
+    unique_drugs.intersection(test_drugs)
+)
+
+response_drug_overlap_with_train = (
+    unique_drugs.intersection(train_drugs)
+)
+
+print("\nResponse-graph drugs belonging to training set:",
+      len(response_drug_overlap_with_train))
+
+print("Response-graph drugs belonging to test set:",
+      len(response_drug_overlap_with_test))
+
+assert len(response_drug_overlap_with_test) == 0
+
+# ------------------------------------------------------------
+# Final verification
+# ------------------------------------------------------------
+
+assert len(response_edges_local) == 7370
+assert len(unique_cells) == 28
+assert len(response_drug_overlap_with_test) == 0
+
+print("\n" + "=" * 70)
+print("✓ RESPONSE GRAPH AUDIT PASSED")
+print("=" * 70)
+
+print("\nVerified:")
+print("✓ 7,370 response-derived edges")
+print("✓ All 28 pancreatic cells represented")
+print("✓ Local cell ind
+
+===== CELL 57 =====
+# Load the previously trained Autoencoder checkpoint
+
+import os
+import torch
+
+MODEL_PATH = r"D:\Pancreatic_GraphTCDR\data\processed\autoencoder_best.pt"
+
+if not os.path.exists(MODEL_PATH):
+    raise FileNotFoundError(
+        f"Autoencoder checkpoint not found:\n{MODEL_PATH}"
+    )
+
+checkpoint = torch.load(
+    MODEL_PATH,
+    map_location="cpu"
+)
+
+print("=" * 70)
+print("AUTOENCODER CHECKPOINT LOADED")
+print("=" * 70)
+
+print("Best epoch:", checkpoint["best_epoch"])
+print("Best holdout MSE:", checkpoint["best_holdout_mse"])
+print("Input dimension:", checkpoint["input_dim"])
+print("Latent dimension:", checkpoint["latent_dim"])
+
+print("\n✓ CHECKPOINT FOUND AND LOADED")
+
+===== CELL 61 =====
+# Extract 512-dimensional autoencoder embeddings
+# for the 28 pancreatic cancer cell lines
+
+import pandas as pd
+import numpy as np
+import torch
+
+MODEL = model
+MODEL.eval()
+
+# Load pancreatic cell-line mapping
+mapping_path = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "pancreatic28_cell_mapping.csv"
+)
+
+mapping = pd.read_csv(mapping_path)
+
+print("Mapping shape:", mapping.shape)
+print(mapping.head())
+
+# GraphTCDR feature files contain all 402 cell lines.
+# 'index' tells us which rows correspond to the 28 pancreatic lines.
+pancreatic_indices = mapping["index"].astype(int).to_numpy()
+
+# Select the corresponding rows from the original 402-cell matrix
+X_pancreatic = X[pancreatic_indices].to(DEVICE)
+
+# Extract encoder representation
+with torch.no_grad():
+    pancreatic_embeddings = MODEL.encoder(X_pancreatic)
+
+pancreatic_embeddings = pancreatic_embeddings.cpu().numpy()
+
+print("\nEmbedding shape:", pancreatic_embeddings.shape)
+print("Expected shape: (28, 512)")
+print("NaN:", np.isnan(pancreatic_embeddings).sum())
+print("Inf:", np.isinf(pancreatic_embeddings).sum())
+
+if pancreatic_embeddings.shape != (28, 512):
+    raise ValueError("Unexpected embedding shape.")
+
+if not np.isfinite(pancreatic_embeddings).all():
+    raise ValueError("Embedding contains NaN or Inf.")
+
+print("\n512-dimensional pancreatic embeddings extracted successfully.")
+
+===== CELL 67 =====
+# Load methylation features for constructing the cell-cell graph
+
+import torch
+import numpy as np
+import os
+
+methylation_path = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "pancreatic28_methylation.pt"
+)
+
+if not os.path.exists(methylation_path):
+    raise FileNotFoundError(methylation_path)
+
+methylation = torch.load(
+    methylation_path,
+    map_location="cpu"
+)
+
+methylation = torch.as_tensor(methylation).float().numpy()
+
+print("=" * 70)
+print("PANCREATIC METHYLATION FEATURES")
+print("=" * 70)
+
+print("Shape:", methylation.shape)
+print("Expected:", (28, 20587))
+print("Min:", methylation.min())
+print("Max:", methylation.max())
+print("NaN:", np.isnan(methylation).sum())
+print("Inf:", np.isinf(methylation).sum())
+
+if methylation.shape != (28, 20587):
+    raise ValueError("Unexpected methylation shape.")
+
+if not np.isfinite(methylation).all():
+    raise ValueError("Methylation matrix contains NaN or Inf.")
+
+print("\n✓ METHYLATION FEATURES VERIFIED")
+
+===== CELL 69 =====
+# Construct the cell-cell similarity graph
+# GraphTCDR rule: |Pearson correlation| >= 0.75
+
+from scipy.stats import pearsonr
+import numpy as np
+import pandas as pd
+
+n_cells = methylation.shape[0]
+
+cell_similarity = np.zeros((n_cells, n_cells), dtype=np.float32)
+
+for i in range(n_cells):
+    for j in range(i, n_cells):
+
+        r, _ = pearsonr(
+            methylation[i],
+            methylation[j]
+        )
+
+        cell_similarity[i, j] = r
+        cell_similarity[j, i] = r
+
+# GraphTCDR threshold
+CELL_THRESHOLD = 0.75
+
+cell_adjacency = (
+    np.abs(cell_similarity) >= CELL_THRESHOLD
+).astype(np.float32)
+
+# Remove self-loops for the graph edge construction
+np.fill_diagonal(cell_adjacency, 0)
+
+print("=" * 70)
+print("CELL-CELL SIMILARITY GRAPH")
+print("=" * 70)
+
+print("Similarity matrix shape:", cell_similarity.shape)
+print("Threshold:", CELL_THRESHOLD)
+
+print("\nSimilarity range:")
+print("Min:", cell_similarity.min())
+print("Max:", cell_similarity.max())
+
+print("\nNumber of undirected edges:",
+      int(np.sum(np.triu(cell_adjacency, k=1))))
+
+print("Non-zero adjacency entries:",
+      int(np.sum(cell_adjacency)))
+
+print("Density:",
+      np.sum(cell_adjacency) / (n_cells * (n_cells - 1)))
+
+# Basic symmetry check
+if not np.allclose(cell_similarity, cell_similarity.T):
+    raise ValueError("Similarity matrix is not symmetric.")
+
+if not np.allclose(cell_adjacency, cell_adjacency.T):
+    raise ValueError("Adjacency matrix is not symmetric.")
+
+print("\n✓ CELL-CELL SIMILARITY GRAPH VERIFIED")
+
+===== CELL 72 =====
+# Construct the drug-drug similarity graph
+# GraphTCDR-style threshold: |Pearson correlation| >= 0.75
+
+from scipy.stats import pearsonr
+
+n_drugs = drug_fingerprints.shape[0]
+
+drug_similarity = np.zeros(
+    (n_drugs, n_drugs),
+    dtype=np.float32
+)
+
+for i in range(n_drugs):
+    for j in range(i, n_drugs):
+
+        r, _ = pearsonr(
+            drug_fingerprints[i],
+            drug_fingerprints[j]
+        )
+
+        drug_similarity[i, j] = r
+        drug_similarity[j, i] = r
+
+DRUG_THRESHOLD = 0.75
+
+drug_adjacency = (
+    np.abs(drug_similarity) >= DRUG_THRESHOLD
+).astype(np.float32)
+
+# Remove self-loops
+np.fill_diagonal(drug_adjacency, 0)
+
+print("=" * 70)
+print("DRUG-DRUG SIMILARITY GRAPH")
+print("=" * 70)
+
+print("Similarity matrix shape:", drug_similarity.shape)
+print("Threshold:", DRUG_THRESHOLD)
+
+print("\nSimilarity range:")
+print("Min:", drug_similarity.min())
+print("Max:", drug_similarity.max())
+
+undirected_edges = int(
+    np.sum(np.triu(drug_adjacency, k=1))
+)
+
+print("\nNumber of undirected edges:", undirected_edges)
+
+print(
+    "Non-zero adjacency entries:",
+    int(np.sum(drug_adjacency))
+)
+
+possible_edges = n_drugs * (n_drugs - 1)
+
+print(
+    "Directed adjacency density:",
+    np.sum(drug_adjacency) / possible_edges
+)
+
+# Verification
+if not np.allclose(
+    drug_similarity,
+    drug_similarity.T
+):
+    raise ValueError("Drug similarity matrix is not symmetric.")
+
+if not np.allclose(
+    drug_adjacency,
+    drug_adjacency.T
+):
+    raise ValueError("Drug adjacency matrix is not symmetric.")
+
+print("\n✓ DRUG-DRUG SIMILARITY GRAPH VERIFIED")
+
+===== CELL 74 =====
+# Verify the frozen cold-drug train/test split
+
+import pandas as pd
+import numpy as np
+import os
+
+table_path = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "integrated_modeling_table.csv"
+)
+
+modeling_df = pd.read_csv(table_path)
+
+print("=" * 70)
+print("VERIFY FROZEN COLD-DRUG SPLIT")
+print("=" * 70)
+
+print("Modeling table:", modeling_df.shape)
+
+train_drugs = set(
+    modeling_df.loc[
+        modeling_df["drug_index"].isin(
+            modeling_df["drug_index"].unique()
+        ),
+        "drug_index"
+    ]
+)
+
+print("Total unique drugs:", modeling_df["drug_index"].nunique())
+
+===== CELL 75 =====
+import os
+
+processed_dir = os.path.join(
+    PROJECT,
+    "data",
+    "processed"
+)
+
+print("Files containing 'split' or 'train' or 'test':")
+
+for filename in sorted(os.listdir(processed_dir)):
+    name = filename.lower()
+
+    if (
+        "split" in name
+        or "train" in name
+        or "test" in name
+    ):
+        print(filename)
+
+===== CELL 76 =====
+splits_dir = os.path.join(
+    PROJECT,
+    "data",
+    "processed",
+    "splits"
+)
+
+print("Split folder:", splits_dir)
+print("\nContents:")
+
+for filename in sorted(os.listdir(splits_dir)):
+    print(filename)
+
+===== CELL 77 =====
+train_path = os.path.join(
+    splits_dir,
+    "cold_drug_train.csv"
+)
+
+test_path = os.path.join(
+    splits_dir,
+    "cold_drug_test.csv"
+)
+
+train_df = pd.read_csv(train_path)
+test_df = pd.read_csv(test_path)
+
+train_drugs = set(train_df["drug_index"])
+test_drugs = set(test_df["drug_index"])
+
+print("=" * 70)
+print("FROZEN COLD-DRUG SPLIT VERIFICATION")
+print("=" * 70)
+
+print("Train shape:", train_df.shape)
+print("Test shape:", test_df.shape)
+
+print("\nUnique train drugs:", len(train_drugs))
+print("Unique test drugs:", len(test_drugs))
+
+print("\nDrug overlap:", len(train_drugs & test_drugs))
+
+print("\nTrain cells:", train_df["omics_index"].nunique())
+print("Test cells:", test_df["omics_index"].nunique())
+
+print("\nTrain response range:")
+print(
+    train_df["log_ic50"].min(),
+    "to",
+    train_df["log_ic50"].max()
+)
+
+print("\nTest response range:")
+print(
+    test_df["log_ic50"].min(),
+    "to",
+    test_df["log_ic50"].max()
+)
+
+if (
+    train_df.shape[0] == 14235
+    and test_df.shape[0] == 3802
+    and len(train_drugs) == 982
+    and len(test_drugs) == 246
+    and len(train_drugs & test_drugs) == 0
+):
+    print("\n✓ FROZEN COLD-DRUG SPLIT VERIFIED")
+else:
+    print("\n⚠ SPLIT DOES NOT MATCH EXPECTED VALUES")
+
+===== CELL 80 =====
+# Construct the response-derived cell-drug graph
+# using TRAINING RESPONSES ONLY.
+#
+# GraphTCDR intended rule:
+# For each drug, select the lower 50% of observed response values.
+#
+# Our adaptation:
+# - use the frozen cold-drug TRAIN split only
+# - use log10(IC50)
+# - lower response = lower log10(IC50)
+# - deterministic rank-based selection
+
+import numpy as np
+import pandas as pd
+import torch
+import os
+
+response_graph_edges = []
+
+drug_edge_summary = []
+
+for drug_idx, group in train_df.groupby("drug_index", sort=True):
+
+    group = group.sort_values(
+        by=["log_ic50", "omics_index"],
+        ascending=[True, True]
+    ).reset_index(drop=True)
+
+    n = len(group)
+
+    # Number of lower-response observations to retain
+    n_edges = int(np.ceil(n / 2))
+
+    selected = group.iloc[:n_edges]
+
+    for _, row in selected.iterrows():
+        response_graph_edges.append([
+            int(row["omics_index"]),
+            int(row["drug_index"])
+        ])
+
+    drug_edge_summary.append({
+        "drug_index": int(drug_idx),
+        "training_pairs": n,
+        "selected_edges": n_edges,
+        "median_log_ic50": group["log_ic50"].median(),
+        "threshold_log_ic50": group.iloc[n_edges - 1]["log_ic50"]
+    })
+
+response_graph_edges = np.asarray(
+    response_graph_edges,
+    dtype=np.int64
+)
+
+drug_edge_summary = pd.DataFrame(
+    drug_edge_summary
+)
+
+print("=" * 70)
+print("TRAINING-ONLY RESPONSE-DERIVED CELL-DRUG GRAPH")
+print("=" * 70)
+
+print("Training response pairs:", len(train_df))
+print("Training drugs:", train_df["drug_index"].nunique())
+print("Cell lines:", train_df["omics_index"].nunique())
+
+print("\nResponse graph edges:", len(response_graph_edges))
+
+print(
+    "Unique cells in response graph:",
+    np.unique(response_graph_edges[:, 0]).size
+)
+
+print(
+    "Unique drugs in response graph:",
+    np.unique(response_graph_edges[:, 1]).size
+)
+
+print("\nEdges per drug:")
+print(drug_edge_summary["selected_edges"].describe())
+
+print("\nFirst 10 drug summaries:")
+display(drug_edge_summary.head(10))
+
+# Verify every response-graph drug belongs to TRAIN
+graph_drugs = set(response_graph_edges[:, 1])
+train_drug_set = set(train_df["drug_index"])
+
+if not graph_drugs.issubset(train_drug_set):
+    raise ValueError(
+        "LEAKAGE: response graph contains a drug outside the training set."
+    )
+
+# Verify no test drug entered the graph
+test_drug_set = set(test_df["drug_index"])
+
+if len(graph_drugs & test_drug_set) != 0:
+    raise ValueError(
+        "LEAKAGE: test drug found in response-derived graph."
+    )
+
+print("\nTrain/test drug overlap inside response graph:",
+      len(graph_drugs & test_drug_set))
+
+print("\n✓ TRAINING-ONLY RESPONSE GRAPH VERIFIED")
+
+===== CELL 84 =====
+# Convert original 402-cell indices to local pancreatic node indices 0–27
+
+original_to_local = {
+    int(row["index"]): local_idx
+    for local_idx, (_, row) in enumerate(mapping_check.iterrows())
+}
+
+print("=" * 70)
+print("402-CELL INDEX → 28-CELL NODE INDEX")
+print("=" * 70)
+
+print("Number of mappings:", len(original_to_local))
+
+print("\nFirst 10 mappings:")
+for original_idx, local_idx in list(original_to_local.items())[:10]:
+    print(
+        f"Original index {original_idx:3d}"
+        f" -> Pancreatic node {local_idx:2d}"
+    )
+
+# Convert response graph cell indices
+response_graph_edges_local = response_graph_edges.copy()
+
+response_graph_edges_local[:, 0] = np.array([
+    original_to_local[int(idx)]
+    for idx in response_graph_edges[:, 0]
+])
+
+print("\nOriginal response edges:",
+      len(response_graph_edges))
+
+print("Local response edges:",
+      len(response_graph_edges_local))
+
+print(
+    "Local cell indices:",
+    response_graph_edges_local[:, 0].min(),
+    "to",
+    response_graph_edges_local[:, 0].max()
+)
+
+if (
+    response_graph_edges_local[:, 0].min() >= 0
+    and response_graph_edges_local[:, 0].max() < 28
+):
+    print("\n✓ CELL INDICES SUCCESSFULLY CONVERTED TO 0–27")
+else:
+    raise ValueError("Local cell-index conversion failed.")
+
+===== CELL 85 =====
+# Final verification of all heterogeneous graph indices
+
+print("=" * 70)
+print("FINAL HETEROGENEOUS GRAPH INDEX CHECK")
+print("=" * 70)
+
+# -------------------------
+# Cell nodes
+# -------------------------
+print("CELL NODES")
+print("Count:", 28)
+print("Valid range: 0–27")
+print(
+    "Response graph range:",
+    response_graph_edges_local[:, 0].min(),
+    "to",
+    response_graph_edges_local[:, 0].max()
+)
+
+# -------------------------
+# Drug nodes
+# -------------------------
+print("\nDRUG NODES")
+print("Count:", 1228)
+print("Valid range: 0–1227")
+print(
+    "Response graph range:",
+    response_graph_edges_local[:, 1].min(),
+    "to",
+    response_graph_edges_local[:, 1].max()
+)
+
+# -------------------------
+# Cell-cell graph
+# -------------------------
+print("\nCELL-CELL GRAPH")
+print("Shape:", cell_adjacency.shape)
+print(
+    "Edges:",
+    int(np.sum(np.triu(cell_adjacency, k=1)))
+)
+
+# -------------------------
+# Drug-drug graph
+# -------------------------
+print("\nDRUG-DRUG GRAPH")
+print("Shape:", drug_adjacency.shape)
+print(
+    "Edges:",
+    int(np.sum(np.triu(drug_adjacency, k=1)))
+)
+
+# -------------------------
+# Response graph
+# -------------------------
+print("\nCELL-DRUG RESPONSE GRAPH")
+print("Edges:", len(response_graph_edges_local))
+print(
+    "Unique cells:",
+    np.unique(response_graph_edges_local[:, 0]).size
+)
+print(
+    "Unique drugs:",
+    np.unique(response_graph_edges_local[:, 1]).size
+)
+
+# -------------------------
+# Validity checks
+# -------------------------
+if response_graph_edges_local[:, 0].min() < 0:
+    raise ValueError("Invalid cell index.")
+
+if response_graph_edges_local[:, 0].max() >= 28:
+    raise ValueError("Cell index exceeds 27.")
+
+if response_graph_edges_local[:, 1].min() < 0:
+    raise ValueError("Invalid drug index.")
+
+if response_graph_edges_local[:, 1].max() >= 1228:
+    raise ValueError("Drug index exceeds 1227.")
+
+if cell_adjacency.shape != (28, 28):
+    raise ValueError("Invalid cell graph.")
+
+if drug_adjacency.shape != (1228, 1228):
+    raise ValueError("Invalid drug graph.")
+
+print("\n✓ ALL HETEROGENEOUS GRAPH INDICES VERIFIED")
+
+===== CELL 90 =====
+# Reload the frozen cold-drug split and pancreatic cell mapping
+
+import os
+import pandas as pd
+import numpy as np
+
+PROJECT = r"D:\Pancreatic_GraphTCDR"
+PROCESSED = os.path.join(PROJECT, "data", "processed")
+
+# --------------------------------------------------
+# Load frozen cold-drug split
+# --------------------------------------------------
+
+splits_dir = os.path.join(PROCESSED, "splits")
+
+train_path = os.path.join(
+    splits_dir,
+    "cold_drug_train.csv"
+)
+
+test_path = os.path.join(
+    splits_dir,
+    "cold_drug_test.csv"
+)
+
+train_df = pd.read_csv(train_path)
+test_df = pd.read_csv(test_path)
+
+# --------------------------------------------------
+# Load pancreatic cell mapping
+# --------------------------------------------------
+
+mapping_path = os.path.join(
+    PROCESSED,
+    "pancreatic28_cell_mapping.csv"
+)
+
+mapping = pd.read_csv(mapping_path)
+
+# --------------------------------------------------
+# Verify
+# --------------------------------------------------
+
+print("=" * 70)
+print("FROZEN SPLIT + CELL MAPPING RELOADED")
+print("=" * 70)
+
+print("\nTRAINING SET")
+print("Rows:", len(train_df))
+print("Unique drugs:", train_df["drug_index"].nunique())
+print("Unique cells:", train_df["omics_index"].nunique())
+
+print("\nTEST SET")
+print("Rows:", len(test_df))
+print("Unique drugs:", test_df["drug_index"].nunique())
+print("Unique cells:", test_df["omics_index"].nunique())
+
+train_drugs = set(train_df["drug_index"])
+test_drugs = set(test_df["drug_index"])
+
+print("\nDrug overlap:", len(train_drugs & test_drugs))
+
+print("\nPANCREATIC CELL MAPPING")
+print("Shape:", mapping.shape)
+print("Original 402-cell indices:", mapping["index"].tolist())
+
+# --------------------------------------------------
+# Safety checks
+# --------------------------------------------------
+
+if len(train_drugs & test_drugs) != 0:
+    raise ValueError(
+        "LEAKAGE ERROR: train and test drugs overlap."
+    )
+
+if mapping.shape[0] != 28:
+    raise ValueError(
+        "Expected exactly 28 pancreatic cell lines."
+    )
+
+if train_df["omics_index"].nunique() != 28:
+    raise ValueError(
+        "Training split does not contain all 28 pancreatic cells."
+    )
+
+if test_df["omics_index"].nunique() != 28:
+    raise ValueError(
+        "Test split does not contain all 28 pancreatic cells."
+    )
+
+print("\n✓ FROZEN SPLIT VERIFIED")
+print("✓ 28-CELL MAPPING VERIFIED")
+print("✓ NO TRAIN/TEST DRUG OVERLAP")
